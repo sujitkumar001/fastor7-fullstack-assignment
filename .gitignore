@@ -1,0 +1,17 @@
+node_modules/
+.env
+.env.*
+!.env.example
+dist/
+build/
+coverage/
+*.log
+.DS_Store
+local_recovery_backups/
+*.backup
+*.step*.backup
+.vscode/
+.idea/
+*.bak
+**/step*_backups/
+docs/STEP*_Audit.txt
