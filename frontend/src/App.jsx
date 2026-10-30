@@ -12,9 +12,26 @@ const getItems = (response) => Array.isArray(response?.data?.results) ? response
 const validAddress = (value) => value && value !== 'null' ? value : 'Address unavailable';
 
 function FoodPhoto({ src, alt, className = '' }) {
-  const [failed, setFailed] = useState(false);
-  useEffect(() => setFailed(false), [src]);
-  return <img className={className} src={failed || !src ? '/food-pizza.svg' : src} alt={alt} onError={() => setFailed(true)} loading="lazy" />;
+  const [failedSrc, setFailedSrc] = useState('');
+
+  const isKnownBrokenHost = typeof src === 'string' &&
+    /^https:\/\/d14vymw7cvldyc\.cloudfront\.net(?:\/|$)/i.test(src);
+
+  const imageSrc = !src || isKnownBrokenHost || failedSrc === src
+    ? '/food-pizza.svg'
+    : src;
+
+  return (
+    <img
+      className={className}
+      src={imageSrc}
+      alt={alt}
+      loading="lazy"
+      onError={() => {
+        if (imageSrc !== '/food-pizza.svg') setFailedSrc(src);
+      }}
+    />
+  );
 }
 function PhoneKeyboard({ onDigit, onDelete }) {
   return <div className="phone-keyboard" aria-label="On-screen numeric keypad">
@@ -22,17 +39,43 @@ function PhoneKeyboard({ onDigit, onDelete }) {
   </div>;
 }
 function OtpInput({ value, onChange, disabled }) {
-  const refs = useRef([]);
-  const setDigit = (input, index) => {
-    const digits = String(input).replace(/\D/g, '');
-    const arr = Array.from({length:6}, (_, i) => value[i] || '');
-    for (let j=0; j<digits.length && index+j<6; j++) arr[index+j] = digits[j];
-    onChange(arr.join(''));
-    refs.current[Math.min(5, index+digits.length)]?.focus();
+  const inputRef = useRef(null);
+  const digits = String(value ?? '').replace(/\D/g, '').slice(0, 6);
+
+  const handleChange = (event) => {
+    onChange(event.target.value.replace(/\D/g, '').slice(0, 6));
   };
-  return <div className="otp-inputs" role="group" aria-label="Six-digit OTP">
-    {Array.from({length:6}, (_, i) => <input key={i} ref={el => { refs.current[i]=el; }} type="text" inputMode="numeric" maxLength={6} value={value[i] || ''} disabled={disabled} aria-label={`Digit ${i+1}`} onChange={e => setDigit(e.target.value, i)} onPaste={e => {e.preventDefault(); setDigit(e.clipboardData.getData('text'), i);}} onKeyDown={e => { if(e.key==='Backspace'){e.preventDefault(); const arr=Array.from({length:6},(_,j)=>value[j]||''); const at=arr[i]?i:Math.max(0,i-1); arr[at]=''; onChange(arr.join('')); refs.current[at]?.focus();} }} />)}
-  </div>;
+
+  return (
+    <div
+      className="otp-inputs"
+      role="group"
+      aria-label="Six-digit verification code"
+      onClick={() => inputRef.current?.focus()}
+    >
+      <input
+        ref={inputRef}
+        className="otp-native-input"
+        type="text"
+        inputMode="numeric"
+        pattern="[0-9]*"
+        autoComplete="one-time-code"
+        maxLength={6}
+        value={digits}
+        onChange={handleChange}
+        disabled={disabled}
+        aria-label="Enter six-digit OTP"
+      />
+
+      <div className="otp-visual-boxes" aria-hidden="true">
+        {Array.from({ length: 6 }, (_, index) => (
+          <span className="otp-digit-box" key={index}>
+            {digits[index] || ''}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
 }
 function Auth({ onAuthenticated }) {
   const [screen, setScreen] = useState('phone');
