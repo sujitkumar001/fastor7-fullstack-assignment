@@ -2,485 +2,93 @@ import { useEffect, useRef, useState } from "react";
 import { requestOtp, verifyOtp, fetchRestaurants } from "./api/fastorServices.js";
 import "./App.css";
 
-function extractRestaurants(response) {
-  const candidates = [
-    response?.data?.results,
-    response?.data?.restaurants,
-    response?.data?.restaurant,
-    response?.data?.items,
-    response?.data,
-    response?.restaurants,
-    response?.results,
-    response,
-  ];
-
-  for (const candidate of candidates) {
-    if (Array.isArray(candidate)) return candidate;
-
-    if (candidate && typeof candidate === "object") {
+function getRestaurants(response) {
+  const candidates = [response?.data?.results, response?.data?.restaurants, response?.data?.restaurant, response?.data?.items, response?.data, response?.restaurants, response?.results, response];
+  for (const value of candidates) {
+    if (Array.isArray(value)) return value;
+    if (value && typeof value === "object") {
       for (const key of ["results", "restaurants", "restaurant", "items", "data"]) {
-        if (Array.isArray(candidate[key])) return candidate[key];
+        if (Array.isArray(value[key])) return value[key];
       }
     }
   }
-
   return [];
 }
-
-function restaurantName(restaurant) {
-  return restaurant.restaurant_name ||
-    restaurant.restaurantName ||
-    restaurant.name ||
-    restaurant.title ||
-    "Restaurant";
+function nameOf(r) { return r.restaurant_name || r.restaurantName || r.name || r.title || "Restaurant"; }
+function addressOf(r) { const address = r.address_complete || r.address || r.location?.address || r.locality || r.city; return address && String(address).trim().toLowerCase() !== "null" ? address : "Address not provided"; }
+function categoryOf(r) {
+  const value = r.cuisine || r.cuisines || r.category || r.food_type || r.restaurant_type;
+  if (Array.isArray(value)) return value.map(x => typeof x === "string" ? x : x?.name).filter(Boolean).join(", ") || "Restaurant";
+  return typeof value === "string" && value.trim() ? value : "Restaurant";
 }
-
-function restaurantImage(restaurant) {
-  const image = restaurant.images?.[0] ||
-    restaurant.image ||
-    restaurant.image_url ||
-    restaurant.restaurant_image ||
-    restaurant.cover_image ||
-    restaurant.logo;
-
-  if (typeof image === "string") return image;
-
-  if (image && typeof image === "object") {
-    return image.url || image.image_url || image.src || "";
-  }
-
-  return "";
+function imageOf(r) {
+  const raw = r.images?.[0] || r.image || r.image_url || r.restaurant_image || r.cover_image || r.logo;
+  const value = typeof raw === "string" ? raw : raw?.url || raw?.image_url || raw?.src;
+  if (!value) return "";
+  try { const url = new URL(value, "https://staging.fastor.ai"); return ["https:", "http:"].includes(url.protocol) ? url.href : ""; } catch { return ""; }
 }
-
-function restaurantAddress(restaurant) {
-  return restaurant.address ||
-    restaurant.location?.address ||
-    restaurant.locality ||
-    restaurant.city ||
-    "Location not available";
-}
-
-function RestaurantPhoto({ restaurant, className = "" }) {
+function FoodImage({ restaurant, className = "" }) {
   const [failed, setFailed] = useState(false);
-  const source = restaurantImage(restaurant);
-
-  let imageUrl = "";
-
-  if (typeof source === "string" && source.trim()) {
-    try {
-      const url = new URL(source, "https://staging.fastor.ai");
-      if (url.protocol === "https:" || url.protocol === "http:") {
-        imageUrl = url.href;
-      }
-    } catch {
-      imageUrl = "";
-    }
-  }
-
-  if (!imageUrl || failed) {
-    return (
-      <div className={`food-photo food-photo-fallback ${className}`}>
-        <span className="food-photo-icon" aria-hidden="true">🍽️</span>
-        <span>Fresh food, great moments</span>
-      </div>
-    );
-  }
-
-  return (
-    <div className={`food-photo ${className}`}>
-      <img
-        src={imageUrl}
-        alt={restaurantName(restaurant)}
-        loading="lazy"
-        onError={() => setFailed(true)}
-      />
-    </div>
-  );
-}
-
-function restaurantCategory(restaurant) {
-  const value =
-    restaurant.cuisine ||
-    restaurant.cuisines ||
-    restaurant.category ||
-    restaurant.food_type ||
-    restaurant.restaurant_type;
-
-  if (Array.isArray(value)) {
-    return value.map((item) =>
-      typeof item === "string" ? item : item?.name
-    ).filter(Boolean).join(", ") || "Restaurant";
-  }
-
-  if (typeof value === "string" && value.trim()) return value.trim();
-
-  return "Restaurant";
-}
-
-function RestaurantList({ token, onLogout }) {
-  const [restaurants, setRestaurants] = useState([]);
-  const [selected, setSelected] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [search, setSearch] = useState("");
-  const [category, setCategory] = useState("All");
-
-  useEffect(() => {
-    let active = true;
-
-    async function load() {
-      try {
-        const response = await fetchRestaurants(token);
-        if (active) setRestaurants(extractRestaurants(response));
-      } catch (err) {
-        if (active) setError(err.message || "Unable to fetch restaurants.");
-      } finally {
-        if (active) setLoading(false);
-      }
-    }
-
-    load();
-
-    return () => {
-      active = false;
-    };
-  }, [token]);
-
-  async function refreshRestaurants() {
-    setLoading(true);
-    setError("");
-
-    try {
-      const response = await fetchRestaurants(token);
-      setRestaurants(extractRestaurants(response));
-    } catch (err) {
-      setError(err.message || "Unable to fetch restaurants.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  const categories = [
-    "All",
-    ...new Set(
-      restaurants
-        .map(restaurantCategory)
-        .filter((value) => value !== "Restaurant")
-        .flatMap((value) => value.split(",").map((item) => item.trim()))
-        .filter(Boolean)
-    ),
-  ].slice(0, 9);
-
-  const visibleRestaurants = restaurants.filter((restaurant) => {
-    const name = restaurantName(restaurant).toLowerCase();
-    const address = String(restaurantAddress(restaurant)).toLowerCase();
-    const cuisine = restaurantCategory(restaurant).toLowerCase();
-    const query = search.trim().toLowerCase();
-
-    const matchesSearch =
-      !query ||
-      name.includes(query) ||
-      address.includes(query) ||
-      cuisine.includes(query);
-
-    const matchesCategory =
-      category === "All" ||
-      cuisine.includes(category.toLowerCase());
-
-    return matchesSearch && matchesCategory;
-  });
-
-  return (
-    <div className="food-app">
-      <header className="food-navbar">
-        <div className="food-navbar-inner">
-          <div className="brand food-brand">
-            <span className="brand-mark">F</span>
-            <span>fastor<span className="brand-dot">.</span></span>
-          </div>
-          <div className="food-navbar-actions">
-            <span className="nav-location">Explore restaurants</span>
-            <button
-              type="button"
-              className="signout-button"
-              onClick={onLogout}
-            >
-              Sign out
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {selected ? (
-        <div className="food-main detail-page">
-          <button
-            type="button"
-            className="food-back"
-            onClick={() => setSelected(null)}
-          >
-            ← Back to restaurants
-          </button>
-
-          <RestaurantPhoto
-            key={selected.id || selected.restaurant_id || restaurantName(selected)}
-            restaurant={selected}
-            className="detail-photo"
-          />
-
-          <div className="detail-panel">
-            <span className="section-kicker">RESTAURANT DETAILS</span>
-            <h1>{restaurantName(selected)}</h1>
-            <p className="detail-category">
-              {restaurantCategory(selected)}
-            </p>
-            <p className="detail-address">
-              📍 {restaurantAddress(selected)}
-            </p>
-            {selected.description && (
-              <p className="detail-description">
-                {selected.description}
-              </p>
-            )}
-            <button
-              type="button"
-              className="food-action-button"
-              onClick={() => setSelected(null)}
-            >
-              Explore more restaurants
-            </button>
-          </div>
-        </div>
-      ) : (
-        <>
-          <section className="food-hero">
-            <div className="food-hero-inner">
-              <div className="hero-copy">
-                <span className="hero-eyebrow">
-                  DISCOVER SOMETHING DELICIOUS
-                </span>
-                <h1>
-                  Good food.
-                  <br />
-                  <span>Great mood.</span>
-                </h1>
-                <p>
-                  Find your next favorite place to eat.
-                  Explore restaurants and discover new flavors.
-                </p>
-                <div className="hero-search">
-                  <span aria-hidden="true">⌕</span>
-                  <input
-                    type="search"
-                    aria-label="Search restaurants"
-                    placeholder="Search restaurants, cuisines or locations"
-                    value={search}
-                    onChange={(event) => setSearch(event.target.value)}
-                  />
-                  {search && (
-                    <button
-                      type="button"
-                      aria-label="Clear search"
-                      onClick={() => setSearch("")}
-                    >
-                      ×
-                    </button>
-                  )}
-                </div>
-              </div>
-              <div className="hero-art" aria-hidden="true">
-                <div className="hero-plate">
-                  <span>🍕</span>
-                </div>
-                <div className="hero-float hero-float-one">🍟</div>
-                <div className="hero-float hero-float-two">🥗</div>
-              </div>
-            </div>
-          </section>
-
-          <main className="food-main">
-            <div className="food-section-heading">
-              <div>
-                <span className="section-kicker">HANDPICK YOUR CRAVING</span>
-                <h2>Explore restaurants</h2>
-                <p>Find something delicious from our restaurant collection.</p>
-              </div>
-              {!loading && !error && (
-                <span className="result-count">
-                  {visibleRestaurants.length} places
-                </span>
-              )}
-            </div>
-
-            {categories.length > 1 && (
-              <div className="category-row" aria-label="Cuisine filters">
-                {categories.map((item) => (
-                  <button
-                    key={item}
-                    type="button"
-                    className={
-                      category === item
-                        ? "category-pill category-pill-active"
-                        : "category-pill"
-                    }
-                    onClick={() => setCategory(item)}
-                  >
-                    {item}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {loading && (
-              <div className="food-state" role="status">
-                Loading delicious places...
-              </div>
-            )}
-
-            {error && (
-              <div className="food-state food-state-error" role="alert">
-                <h3>We couldn't load the restaurants</h3>
-                <p>{error}</p>
-                <button
-                  type="button"
-                  className="food-action-button"
-                  onClick={refreshRestaurants}
-                >
-                  Try again
-                </button>
-              </div>
-            )}
-
-            {!loading && !error && visibleRestaurants.length === 0 && (
-              <div className="food-state">
-                <h3>No matching restaurants</h3>
-                <p>Try another search or cuisine.</p>
-                <button
-                  type="button"
-                  className="food-action-button"
-                  onClick={() => {
-                    setSearch("");
-                    setCategory("All");
-                  }}
-                >
-                  Clear filters
-                </button>
-              </div>
-            )}
-
-            {!loading && !error && visibleRestaurants.length > 0 && (
-              <div className="food-grid">
-                {visibleRestaurants.map((restaurant, index) => (
-                  <button
-                    type="button"
-                    className="food-card"
-                    key={
-                      restaurant.id ||
-                      restaurant.restaurant_id ||
-                      index
-                    }
-                    onClick={() => setSelected(restaurant)}
-                  >
-                    <RestaurantPhoto
-                      restaurant={restaurant}
-                      className="card-photo"
-                    />
-                    <div className="food-card-body">
-                      <span className="food-card-category">
-                        {restaurantCategory(restaurant)}
-                      </span>
-                      <h3>{restaurantName(restaurant)}</h3>
-                      <p>📍 {restaurantAddress(restaurant)}</p>
-                      <span className="food-card-link">
-                        View restaurant <span aria-hidden="true">→</span>
-                      </span>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </main>
-
-          <footer className="food-footer">
-            <strong>fastor<span>.</span></strong>
-            <p>Discover good food and great places.</p>
-          </footer>
-        </>
-      )}
-    </div>
-  );
+  const src = imageOf(restaurant);
+  const illustrations = ["/food-pizza.svg", "/food-burger.svg", "/food-shake.svg"];
+  const id = Number(restaurant?.restaurant_id || restaurant?.id || 0);
+  const fallback = illustrations[Math.abs(id) % illustrations.length];
+  return <img className={`${className} food-photo`} src={src && !failed ? src : fallback} alt={src && !failed ? nameOf(restaurant) : `Illustrative food artwork for ${nameOf(restaurant)}`} loading="lazy" onError={() => setFailed(true)} />;
 }
 function OtpBoxes({ value, onChange, disabled }) {
-  const inputs = useRef([]);
-
-  function applyDigits(text, startIndex) {
+  const refs = useRef([]);
+  function insert(text, at) {
     const digits = String(text).replace(/\D/g, "");
     if (!digits) return;
-
     const next = value.padEnd(6, " ").split("");
-
-    for (let i = 0; i < digits.length && startIndex + i < 6; i++) {
-      next[startIndex + i] = digits[i];
-    }
-
+    for (let i = 0; i < digits.length && i + at < 6; i++) next[at + i] = digits[i];
     onChange(next.join("").trimEnd());
-
-    const nextIndex = Math.min(startIndex + digits.length, 5);
-    inputs.current[nextIndex]?.focus();
+    refs.current[Math.min(at + digits.length, 5)]?.focus();
   }
-
-  function handleKeyDown(event, index) {
-    if (event.key === "Backspace") {
-      event.preventDefault();
-
-      const next = value.padEnd(6, " ").split("");
-      const target = next[index] && next[index] !== " "
-        ? index
-        : Math.max(0, index - 1);
-
-      next[target] = " ";
-      onChange(next.join("").trimEnd());
-      inputs.current[target]?.focus();
-    }
-
-    if (event.key === "ArrowLeft" && index > 0) {
-      event.preventDefault();
-      inputs.current[index - 1]?.focus();
-    }
-
-    if (event.key === "ArrowRight" && index < 5) {
-      event.preventDefault();
-      inputs.current[index + 1]?.focus();
-    }
-  }
-
-  return (
-    <div className="otp-boxes" role="group" aria-label="Six-digit verification code">
-      {Array.from({ length: 6 }, (_, index) => (
-        <input
-          key={index}
-          ref={(element) => { inputs.current[index] = element; }}
-          className="otp-box"
-          type="text"
-          inputMode="numeric"
-          pattern="[0-9]*"
-          autoComplete={index === 0 ? "one-time-code" : "off"}
-          aria-label={`OTP digit ${index + 1}`}
-          maxLength={6}
-          value={value[index] || ""}
-          disabled={disabled}
-          onChange={(event) => applyDigits(event.target.value, index)}
-          onKeyDown={(event) => handleKeyDown(event, index)}
-          onPaste={(event) => {
-            event.preventDefault();
-            applyDigits(event.clipboardData.getData("text"), index);
-          }}
-          onFocus={(event) => event.target.select()}
-        />
-      ))}
-    </div>
-  );
+  return <div className="otp-boxes" role="group" aria-label="Six digit verification code">{Array.from({ length: 6 }, (_, i) => <input key={i} ref={el => { refs.current[i] = el; }} className="otp-box" inputMode="numeric" type="text" autoComplete={i === 0 ? "one-time-code" : "off"} aria-label={`OTP digit ${i + 1}`} value={value[i] || ""} disabled={disabled} onChange={e => insert(e.target.value, i)} onPaste={e => { e.preventDefault(); insert(e.clipboardData.getData("text"), i); }} onKeyDown={e => { if (e.key === "Backspace") { e.preventDefault(); const next = value.padEnd(6, " ").split(""); const at = next[i] !== " " ? i : Math.max(i - 1, 0); next[at] = " "; onChange(next.join("").trimEnd()); refs.current[at]?.focus(); } if (e.key === "ArrowLeft") refs.current[Math.max(i - 1, 0)]?.focus(); if (e.key === "ArrowRight") refs.current[Math.min(i + 1, 5)]?.focus(); }} />)}</div>;
 }
-function App() {
+function Restaurants({ token, onLogout }) {
+  const [items, setItems] = useState([]);
+  const [selected, setSelected] = useState(null);
+  const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [quantity, setQuantity] = useState(1);
+  const [cartNotice, setCartNotice] = useState("");
+  const [reload, setReload] = useState(0);
+  useEffect(() => { let active = true; fetchRestaurants(token).then(data => { if (active) setItems(getRestaurants(data)); }).catch(e => { if (active) setError(e.message || "Unable to load restaurants"); }).finally(() => { if (active) setLoading(false); }); return () => { active = false; }; }, [token, reload]);
+  const filtered = items.filter(r => [nameOf(r), addressOf(r), categoryOf(r)].some(v => String(v).toLowerCase().includes(search.trim().toLowerCase())));
+  function open(r) { setSelected(r); setQuantity(1); setCartNotice(""); }
+  return <div className="mobile-screen dining-screen">
+    {selected ? <>
+      <button type="button" className="detail-back" onClick={() => setSelected(null)} aria-label="Back to restaurants">‹</button>
+      <FoodImage restaurant={selected} className="detail-hero" />
+      <div className="detail-content">
+        <div className="detail-title-row"><h1>{nameOf(selected)}</h1><div className="quantity-control"><button type="button" aria-label="Decrease quantity" onClick={() => setQuantity(n => Math.max(1, n - 1))}>−</button><span>{quantity}</span><button type="button" aria-label="Increase quantity" onClick={() => setQuantity(n => Math.min(99, n + 1))}>+</button></div></div>
+        <p className="orange-text">{categoryOf(selected)}</p>
+        <p className="detail-copy">{selected.description || `Discover ${nameOf(selected)} and explore great food nearby.`}</p>
+        <div className="detail-divider" />
+        <h2>Restaurant information</h2>
+        <p className="detail-copy">📍 {addressOf(selected)}</p>
+        <p className="demo-disclaimer">Restaurant details are from Fastor staging. Food imagery is illustrative where API logos are unavailable. Cart is a UI-only demo; no order will be placed.</p>
+      </div>
+      <div className="sticky-action"><button type="button" className="orange-button" onClick={() => setCartNotice(`${quantity} item${quantity > 1 ? "s" : ""} selected for demo. No order was placed.`)}>Add to cart</button>{cartNotice && <p role="status" className="inline-notice">{cartNotice}</p>}</div>
+    </> : <>
+      <div className="list-top"><div><span className="top-caption">Current Locations</span><strong>Model Town, New Delhi</strong></div><button type="button" className="logout-link" onClick={onLogout}>Logout</button></div>
+      <div className="search-row"><label className="search-field"><span aria-hidden="true">⌕</span><input aria-label="Search restaurants" placeholder="Search food or restaurants" value={search} onChange={e => setSearch(e.target.value)} /></label><div className="mini-square" aria-hidden="true">♨</div><div className="mini-square blue-square" aria-hidden="true">▣</div></div>
+      <div className="section-heading"><h2>Best Seller</h2><span>Explore</span></div>
+      {loading && <p role="status" className="state-message">Loading restaurants...</p>}
+      {error && <div role="alert" className="state-message"><p>{error}</p><button type="button" onClick={() => { setLoading(true); setError(""); setReload(n => n + 1); }}>Try again</button></div>}
+      {!loading && !error && <>
+        <div className="bestseller-strip">{filtered.slice(0, 5).map((r, i) => <button type="button" key={r.id || r.restaurant_id || i} className="bestseller-item" onClick={() => open(r)}><FoodImage restaurant={r} className="bestseller-photo" /><span>{nameOf(r)}</span></button>)}</div>
+        <div className="promo-banner"><div><small>Experience our delicious new dishes</small><strong>30% OFF</strong><span>Discover restaurants</span></div><img className="promo-art" src="/food-pizza.svg" alt="" /></div>
+        <div className="section-heading popular-heading"><h2>Popular Items</h2><span>{filtered.length} restaurants shown</span></div>
+        {filtered.length === 0 ? <p className="state-message">No matching restaurants. Try another search.</p> : filtered.map((r, i) => <button type="button" className="popular-item" key={r.id || r.restaurant_id || i} onClick={() => open(r)}><FoodImage restaurant={r} className="popular-photo" /><div className="popular-info"><h3>{nameOf(r)}</h3><p>{categoryOf(r)}</p><small>{addressOf(r)}</small><span className="view-item">View details</span></div><span className="item-arrow" aria-hidden="true">›</span></button>)}
+      </>}
+    </>}
+  </div>;
+}
+export default function App() {
   const [step, setStep] = useState("phone");
   const [phone, setPhone] = useState("");
   const [otp, setOtp] = useState("");
@@ -488,180 +96,14 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-
-  async function handleRequestOtp(event) {
-    event.preventDefault();
-    setError("");
-    setNotice("");
-    setLoading(true);
-
-    try {
-      await requestOtp(phone);
-      setStep("otp");
-      setNotice("OTP requested successfully.");
-    } catch (err) {
-      setError(err.message || "Unable to request OTP.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleVerifyOtp(event) {
-    event.preventDefault();
-    setError("");
-    setNotice("");
-    setLoading(true);
-
-    try {
-      const result = await verifyOtp(phone, otp);
-      setToken(result.token);
-      setStep("restaurants");
-    } catch (err) {
-      setError(err.message || "Unable to verify OTP.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  function handleLogout() {
-    setToken("");
-    setOtp("");
-    setStep("phone");
-    setError("");
-    setNotice("");
-  }
-
-  return (
-    <main className="app-shell">
-      <section className={step === "restaurants" ? "restaurant-container" : "auth-card"}>
-        {step !== "restaurants" && (
-          <div className="brand">
-            <span className="brand-mark">F</span>
-            <span>fastor</span>
-          </div>
-        )}
-
-        {step === "phone" && (
-          <>
-            <div className="eyebrow">WELCOME</div>
-            <h1>Welcome Back!</h1>
-            <p className="subtitle">
-              Enter your mobile number to continue.
-            </p>
-
-            <form onSubmit={handleRequestOtp}>
-              <label htmlFor="phone">Mobile Number</label>
-
-              <div className="phone-field">
-                <span className="dial-code">+91</span>
-                <input
-                  id="phone"
-                  type="tel"
-                  inputMode="numeric"
-                  autoComplete="tel-national"
-                  placeholder="Enter 10-digit number"
-                  maxLength={10}
-                  value={phone}
-                  onChange={(event) => {
-                    setPhone(event.target.value.replace(/\D/g, ""));
-                    setError("");
-                  }}
-                  required
-                />
-              </div>
-
-              <button
-                className="primary-button"
-                type="submit"
-                disabled={loading || phone.length !== 10}
-              >
-                {loading ? "Please wait..." : "Continue"}
-              </button>
-            </form>
-          </>
-        )}
-
-        {step === "otp" && (
-          <>
-            <button
-              type="button"
-              className="back-button"
-              onClick={() => {
-                setStep("phone");
-                setError("");
-                setNotice("");
-              }}
-            >
-              ← Back
-            </button>
-
-            <div className="eyebrow">VERIFICATION</div>
-            <h1>OTP Verification</h1>
-            <p className="subtitle">
-              Enter the 6-digit code for +91 {phone}.
-            </p>
-
-            <form onSubmit={handleVerifyOtp}>
-              <label htmlFor="otp">Verification Code</label>
-
-              <OtpBoxes
-                value={otp}
-                onChange={(value) => {
-                  setOtp(value);
-                  setError("");
-                }}
-                disabled={loading}
-              />
-
-              <p className="otp-hint">
-                Default test OTP in the supplied Postman collection: 123456
-              </p>
-
-              <button
-                className="primary-button"
-                type="submit"
-                disabled={loading || otp.length !== 6}
-              >
-                {loading ? "Verifying..." : "Verify & Continue"}
-              </button>
-            </form>
-
-            <button
-              type="button"
-              className="text-button"
-              disabled={loading}
-              onClick={async () => {
-                setError("");
-                setNotice("");
-                setLoading(true);
-                try {
-                  await requestOtp(phone);
-                  setNotice("OTP requested again.");
-                } catch (err) {
-                  setError(err.message || "Unable to resend OTP.");
-                } finally {
-                  setLoading(false);
-                }
-              }}
-            >
-              Resend OTP
-            </button>
-          </>
-        )}
-
-        {step === "restaurants" && (
-          <RestaurantList token={token} onLogout={handleLogout} />
-        )}
-
-        {error && <p role="alert" className="error-message">{error}</p>}
-        {notice && <p role="status" className="notice-message">{notice}</p>}
-
-        <p className="footer-note">
-          Fastor React Development Assignment
-        </p>
-      </section>
-    </main>
-  );
+  const [resendAfter, setResendAfter] = useState(0);
+  useEffect(() => { if (step !== "otp" || resendAfter <= 0) return; const id = setTimeout(() => setResendAfter(v => Math.max(0, v - 1)), 1000); return () => clearTimeout(id); }, [step, resendAfter]);
+  async function submitPhone(e) { e.preventDefault(); setError(""); setNotice(""); setLoading(true); try { await requestOtp(phone); setStep("otp"); setResendAfter(30); setNotice("OTP request accepted by staging API. Use the test OTP supplied in the assignment collection."); } catch (err) { setError(err.message || "Could not request OTP"); } finally { setLoading(false); } }
+  async function submitOtp(e) { e.preventDefault(); setError(""); setNotice(""); setLoading(true); try { const result = await verifyOtp(phone, otp); setToken(result.token); setStep("restaurants"); } catch (err) { setError(err.message || "OTP verification failed"); } finally { setLoading(false); } }
+  async function resend() { setError(""); setNotice(""); setLoading(true); try { await requestOtp(phone); setResendAfter(30); setNotice("OTP requested again from staging API."); } catch (err) { setError(err.message || "Could not resend OTP"); } finally { setLoading(false); } }
+  return <main className="app-viewport"><div className="device-frame">{step === "restaurants" ? <Restaurants token={token} onLogout={() => { setToken(""); setOtp(""); setStep("phone"); setError(""); setNotice(""); }} /> : <div className="mobile-screen auth-screen">
+    <div className="auth-back-row"><button type="button" className="arrow-back" aria-label="Back" onClick={() => { setStep("phone"); setError(""); setNotice(""); }}>‹</button></div>
+    {step === "phone" ? <><h1>Sign Up to Fastor</h1><p className="auth-description">Let us know your mobile number and we will send you an OTP for verification</p><form onSubmit={submitPhone} className="auth-form"><label className="phone-input"><span>+91</span><input type="tel" inputMode="numeric" autoComplete="tel-national" placeholder="0000000000" aria-label="Mobile number" maxLength={10} value={phone} onChange={e => setPhone(e.target.value.replace(/\D/g, ""))} required /></label><button type="submit" className="orange-button" disabled={loading || phone.length !== 10}>{loading ? "Please wait..." : "Get OTP"}</button></form><p className="terms">By clicking, I accept the Terms &amp; Conditions and Privacy Policy</p></> : <><h1>6-digit code</h1><p className="auth-description">Please enter the code we&apos;ve sent to<br /><strong>+91 {phone}</strong></p><form onSubmit={submitOtp} className="auth-form"><OtpBoxes value={otp} onChange={setOtp} disabled={loading} /><button type="submit" className="orange-button" disabled={loading || otp.length !== 6}>{loading ? "Verifying..." : "Continue"}</button></form><p className="resend-row">I didn&apos;t receive a code {resendAfter > 0 ? <span>({`00:${String(resendAfter).padStart(2, "0")}`})</span> : <button type="button" disabled={loading} onClick={resend}>Resend OTP</button>}</p><p className="test-otp">Staging test OTP: 123456</p></>}
+    {error && <p className="form-message error-message" role="alert">{error}</p>}{notice && <p className="form-message notice-message" role="status">{notice}</p>}
+  </div>}</div></main>;
 }
-
-export default App;
